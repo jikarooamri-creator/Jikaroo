@@ -1,0 +1,54 @@
+name: github rdp tailscale edition
+
+on:
+  workflow_dispatch:
+    inputs:
+      password:
+        description: 'set rdp password'
+        required: true
+        default: 'AtaybNa3na3@2026!'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Install Tailscale via Winget
+        run: |
+          winget install Tailscale.Tailscale --silent --accept-package-agreements --accept-source-agreements
+
+      - name: Connect to Tailscale Network
+        run: |
+          & "c:\program files\tailscale\tailscale.exe" up --authkey=${{ secrets.TS_KEY }} --accept-routes
+
+      - name: configuring remote desktop
+        run: |
+          echo "disabling password complexity requirements..."
+          secedit /export /cfg $env:TEMP\secpol.cfg
+          (gc $env:TEMP\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0") | Out-File $env:TEMP\secpol.cfg
+          (gc $env:TEMP\secpol.cfg).replace("MinimumPasswordLength = 7", "MinimumPasswordLength = 0") | Out-File $env:TEMP\secpol.cfg
+          secedit /configure /db $env:windir\security\database\secpol.sdb /cfg $env:TEMP\secpol.cfg /areas SECURITYPOLICY
+          echo "setting up user credentials..."
+          net user runneradmin "${{ github.event.inputs.password }}"
+          echo "configuring registry and firewall..."
+          set-itemproperty -path 'hklm:\system\currentcontrolset\control\terminal server' -name "fDenyTSConnections" -value 0
+          enable-netfirewallrule -displaygroup "remote desktop"
+          set-itemproperty -path 'hklm:\system\currentcontrolset\control\terminal server\winstations\rdp-tcp' -name "userauthentication" -value 1
+          echo "rdp protocol enabled."
+
+      - name: maintaining connection
+        run: |
+          echo "================================================"
+          echo "server is live"
+          echo "username: runneradmin"
+          echo "password: ${{ github.event.inputs.password }}"
+          echo "internal ip address:"
+          & "c:\program files\tailscale\tailscale.exe" ip -4
+          echo "================================================"
+          while ($true) {
+            echo "keep-alive: $(get-date)"
+            start-sleep -seconds 300
+          }
